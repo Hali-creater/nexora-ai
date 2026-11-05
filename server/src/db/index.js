@@ -105,7 +105,7 @@ function initDb() {
       UNIQUE(user_id, provider_id)
     );
 
-    -- Provider usage records
+    -- Provider usage records with clear estimation tracking
     CREATE TABLE IF NOT EXISTS provider_usage (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -114,7 +114,7 @@ function initDb() {
       tokens_in INTEGER DEFAULT 0,
       tokens_out INTEGER DEFAULT 0,
       duration_ms INTEGER DEFAULT 0,
-      estimated_cost REAL DEFAULT 0.0,
+      is_estimated INTEGER DEFAULT 1, -- 1 = Estimated (local heuristic), 0 = Provider Reported Actual
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
 

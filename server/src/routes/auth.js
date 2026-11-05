@@ -111,8 +111,7 @@ Always analyze user-supplied source files objectively. Never invent historical b
         id: userId,
         email: normalizedEmail,
         name: name.trim()
-      },
-      sessionId
+      }
     });
   } catch (err) {
     console.error('Registration error:', err);
@@ -154,8 +153,7 @@ router.post('/login', async (req, res) => {
         id: user.id,
         email: user.email,
         name: user.name
-      },
-      sessionId
+      }
     });
   } catch (err) {
     console.error('Login error:', err);

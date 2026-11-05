@@ -8,18 +8,20 @@ const { authMiddleware } = require('../middleware/auth');
 const router = express.Router();
 
 // Memory storage for uploads to ensure no uninspected files hit disk
+const {
+  ALLOWED_EXTENSIONS,
+  MAX_FILE_SIZE,
+  MAX_EXTRACTED_CHARS,
+  sanitizeFilename,
+  parseFileContent
+} = require('../services/fileSecurity');
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB maximum file size limit
+    fileSize: MAX_FILE_SIZE
   }
 });
-
-// Allowed file extensions
-const ALLOWED_EXTENSIONS = new Set([
-  '.py', '.mql5', '.mq5', '.mqh', '.csv', '.json', '.txt',
-  '.log', '.pdf', '.md', '.markdown', '.js', '.ts', '.html', '.css'
-]);
 
 // 1. List user projects
 router.get('/', authMiddleware, (req, res) => {
@@ -135,28 +137,17 @@ router.post('/:id/files', authMiddleware, upload.array('files', 10), async (req,
     const insertedFiles = [];
 
     for (const file of req.files) {
-      const ext = '.' + file.originalname.split('.').pop().toLowerCase();
+      const safeName = sanitizeFilename(file.originalname);
+      const ext = '.' + safeName.split('.').pop().toLowerCase();
+
       if (!ALLOWED_EXTENSIONS.has(ext)) {
-        return res.status(400).json({ error: `File type ${ext} is not supported.` });
+        return res.status(400).json({ error: `File type '${ext}' is not supported.` });
       }
 
-      let parsedText = '';
-      if (ext === '.pdf') {
-        try {
-          const pdfData = await pdfParse(file.buffer);
-          parsedText = pdfData.text || '';
-        } catch (pdfErr) {
-          console.error('PDF Parse error:', pdfErr);
-          parsedText = '[Could not extract text from PDF document]';
-        }
-      } else {
-        // Plaintext / source code / CSV / JSON
-        parsedText = file.buffer.toString('utf-8');
-      }
+      let parsedText = await parseFileContent(file.buffer, ext);
 
-      // Safe truncate if unreasonably huge (e.g. > 500,000 characters)
-      if (parsedText.length > 500000) {
-        parsedText = parsedText.substring(0, 500000) + '\n\n[TRUNCATED: File exceeds 500,000 character context safety window]';
+      if (parsedText.length > MAX_EXTRACTED_CHARS) {
+        parsedText = parsedText.substring(0, MAX_EXTRACTED_CHARS) + '\n\n[TRUNCATED: File exceeds 500,000 character context safety window]';
       }
 
       const fileId = crypto.randomUUID();
@@ -167,7 +158,7 @@ router.post('/:id/files', authMiddleware, upload.array('files', 10), async (req,
         fileId,
         projectId,
         req.user.id,
-        file.originalname,
+        safeName,
         ext.replace('.', ''),
         file.size,
         parsedText
@@ -175,7 +166,7 @@ router.post('/:id/files', authMiddleware, upload.array('files', 10), async (req,
 
       insertedFiles.push({
         id: fileId,
-        filename: file.originalname,
+        filename: safeName,
         fileType: ext.replace('.', ''),
         fileSize: file.size,
         preview: parsedText.substring(0, 300)
@@ -215,29 +206,21 @@ router.post('/inspect-file', authMiddleware, upload.single('file'), async (req, 
       return res.status(400).json({ error: 'No file provided' });
     }
 
-    const ext = '.' + req.file.originalname.split('.').pop().toLowerCase();
+    const safeName = sanitizeFilename(req.file.originalname);
+    const ext = '.' + safeName.split('.').pop().toLowerCase();
+
     if (!ALLOWED_EXTENSIONS.has(ext)) {
-      return res.status(400).json({ error: `File type ${ext} is not supported.` });
+      return res.status(400).json({ error: `File type '${ext}' is not supported.` });
     }
 
-    let parsedText = '';
-    if (ext === '.pdf') {
-      try {
-        const pdfData = await pdfParse(req.file.buffer);
-        parsedText = pdfData.text || '';
-      } catch (e) {
-        parsedText = '[Could not extract text from PDF document]';
-      }
-    } else {
-      parsedText = req.file.buffer.toString('utf-8');
-    }
+    let parsedText = await parseFileContent(req.file.buffer, ext);
 
-    if (parsedText.length > 500000) {
-      parsedText = parsedText.substring(0, 500000) + '\n\n[TRUNCATED: File exceeds context limit]';
+    if (parsedText.length > MAX_EXTRACTED_CHARS) {
+      parsedText = parsedText.substring(0, MAX_EXTRACTED_CHARS) + '\n\n[TRUNCATED: File exceeds context limit]';
     }
 
     return res.json({
-      filename: req.file.originalname,
+      filename: safeName,
       fileType: ext.replace('.', ''),
       size: req.file.size,
       text: parsedText

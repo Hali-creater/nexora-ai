@@ -73,9 +73,23 @@ router.post('/stream', authMiddleware, async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no'); // Disable reverse-proxy response buffering
   res.flushHeaders?.();
 
+  let isClientConnected = true;
+  req.on('close', () => {
+    isClientConnected = false;
+  });
+
+  // Periodic SSE keepalive ping to prevent proxy connection drops
+  const keepAliveInterval = setInterval(() => {
+    if (isClientConnected && !res.writableEnded) {
+      res.write(': keepalive\n\n');
+    }
+  }, 15000);
+
   let fullResponse = '';
+  let providerUsageReported = null;
   const startTime = Date.now();
 
   try {
@@ -83,52 +97,78 @@ router.post('/stream', authMiddleware, async (req, res) => {
       messages,
       { apiKey, model: modelId, temperature, maxTokens },
       (chunk) => {
+        if (!isClientConnected || res.writableEnded) return;
+
         if (chunk.done) {
           res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-        } else if (chunk.text) {
-          fullResponse += chunk.text;
-          res.write(`data: ${JSON.stringify({ delta: chunk.text })}\n\n`);
+        } else {
+          if (chunk.text) {
+            fullResponse += chunk.text;
+            res.write(`data: ${JSON.stringify({ delta: chunk.text })}\n\n`);
+          }
+          if (chunk.usage) {
+            providerUsageReported = chunk.usage;
+          }
         }
       }
     );
 
     const durationMs = Date.now() - startTime;
-    // Rough token estimate (avg ~4 chars per token)
-    const tokensOut = Math.round(fullResponse.length / 4);
-    const tokensIn = messages.reduce((acc, m) => acc + Math.round((m.content || '').length / 4), 0);
+
+    // Distinguish actual provider reported tokens from local estimates
+    let tokensIn = 0;
+    let tokensOut = 0;
+    let isEstimated = 1;
+
+    if (providerUsageReported) {
+      tokensIn = providerUsageReported.prompt_tokens || providerUsageReported.input_tokens || providerUsageReported.promptTokenCount || 0;
+      tokensOut = providerUsageReported.completion_tokens || providerUsageReported.output_tokens || providerUsageReported.candidatesTokenCount || 0;
+      isEstimated = 0;
+    } else {
+      // Local estimate
+      tokensOut = Math.round(fullResponse.length / 4);
+      tokensIn = messages.reduce((acc, m) => acc + Math.round((m.content || '').length / 4), 0);
+      isEstimated = 1;
+    }
 
     // Save usage metrics in DB
     try {
       db.prepare(`
-        INSERT INTO provider_usage (id, user_id, provider_id, model_id, tokens_in, tokens_out, duration_ms)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-      `).run(crypto.randomUUID(), req.user.id, providerId, modelId, tokensIn, tokensOut, durationMs);
+        INSERT INTO provider_usage (id, user_id, provider_id, model_id, tokens_in, tokens_out, duration_ms, is_estimated)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(crypto.randomUUID(), req.user.id, providerId, modelId, tokensIn, tokensOut, durationMs, isEstimated);
     } catch (e) {
       console.error('Failed to log usage:', e);
     }
 
-    res.end();
   } catch (err) {
     console.error('Stream error:', err.message);
-    res.write(`data: ${JSON.stringify({ error: err.message || 'Stream generation failed' })}\n\n`);
-    res.end();
+    if (isClientConnected && !res.writableEnded) {
+      res.write(`data: ${JSON.stringify({ error: err.message || 'Stream generation failed' })}\n\n`);
+    }
+  } finally {
+    clearInterval(keepAliveInterval);
+    if (!res.writableEnded) {
+      res.end();
+    }
   }
 });
 
 // 4. Log Puter Usage (Called by frontend after user-pays Puter completion)
 router.post('/log-puter-usage', authMiddleware, (req, res) => {
   try {
-    const { modelId, tokensIn, tokensOut, durationMs } = req.body;
+    const { modelId, tokensIn, tokensOut, durationMs, isEstimated } = req.body;
     db.prepare(`
-      INSERT INTO provider_usage (id, user_id, provider_id, model_id, tokens_in, tokens_out, duration_ms)
-      VALUES (?, ?, 'puter', ?, ?, ?, ?)
+      INSERT INTO provider_usage (id, user_id, provider_id, model_id, tokens_in, tokens_out, duration_ms, is_estimated)
+      VALUES (?, ?, 'puter', ?, ?, ?, ?, ?)
     `).run(
       crypto.randomUUID(),
       req.user.id,
       modelId || 'puter-ai',
       tokensIn || 0,
       tokensOut || 0,
-      durationMs || 0
+      durationMs || 0,
+      isEstimated !== undefined ? (isEstimated ? 1 : 0) : 1
     );
     return res.json({ success: true });
   } catch (err) {
@@ -140,7 +180,7 @@ router.post('/log-puter-usage', authMiddleware, (req, res) => {
 router.get('/usage', authMiddleware, (req, res) => {
   try {
     const rows = db.prepare(`
-      SELECT provider_id, model_id, tokens_in, tokens_out, duration_ms, created_at
+      SELECT provider_id, model_id, tokens_in, tokens_out, duration_ms, is_estimated, created_at
       FROM provider_usage
       WHERE user_id = ?
       ORDER BY created_at DESC
@@ -152,7 +192,9 @@ router.get('/usage', authMiddleware, (req, res) => {
         COUNT(*) as total_requests,
         SUM(tokens_in) as total_tokens_in,
         SUM(tokens_out) as total_tokens_out,
-        AVG(duration_ms) as avg_duration_ms
+        AVG(duration_ms) as avg_duration_ms,
+        SUM(CASE WHEN is_estimated = 1 THEN 1 ELSE 0 END) as estimated_count,
+        SUM(CASE WHEN is_estimated = 0 THEN 1 ELSE 0 END) as actual_count
       FROM provider_usage
       WHERE user_id = ?
     `).get(req.user.id);

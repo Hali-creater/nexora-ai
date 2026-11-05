@@ -13,23 +13,65 @@ const projectsRoutes = require('./routes/projects');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Security Middleware
+// Security Middleware with tested Content Security Policy (CSP)
 app.use(helmet({
-  contentSecurityPolicy: false // Allows SSE and inline styles for dynamic syntax highlighting
-}));
-
-// CORS Configuration
-const allowedOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
-app.use(cors({
-  origin: (origin, callback) => {
-    // Allow local development, Puter webview iframe contexts, or exact configured origin
-    if (!origin || origin === allowedOrigin || origin.includes('puter.com') || origin.includes('localhost')) {
-      callback(null, true);
-    } else {
-      callback(null, true); // Permissive in dev, lockable via CORS_ORIGIN in prod
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://js.puter.com"],
+      scriptSrcElem: ["'self'", "'unsafe-inline'", "https://js.puter.com"],
+      connectSrc: ["'self'", "https://*.puter.com", "https://api.openai.com", "https://api.anthropic.com", "https://openrouter.ai", "https://generativelanguage.googleapis.com", "https://api.groq.com", "https://api.deepseek.com", "https://api.mistral.ai"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdn.jsdelivr.net"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdn.jsdelivr.net", "data:"],
+      imgSrc: ["'self'", "data:", "blob:", "https:"],
+      objectSrc: ["'none'"],
+      frameSrc: ["'self'", "https://*.puter.com", "https://puter.com"],
+      upgradeInsecureRequests: process.env.NODE_ENV === 'production' ? [] : null
     }
   },
-  credentials: true
+  crossOriginEmbedderPolicy: false // Prevents breaking Puter SDK iframes
+}));
+
+const { validateEnvironment } = require('./services/config');
+
+// Execute startup security and secret validation
+validateEnvironment();
+
+// Strict CORS Configuration
+const isProd = process.env.NODE_ENV === 'production';
+const rawOrigins = process.env.CORS_ORIGIN || (isProd ? '' : 'http://localhost:5173,http://localhost:3000,http://127.0.0.1:5173');
+const allowedOrigins = rawOrigins
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (e.g. server-to-server or mobile apps if applicable, or same-origin direct requests)
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    if (!isProd) {
+      // In non-production, permit localhost origins for developer convenience
+      try {
+        const parsed = new URL(origin);
+        if (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1') {
+          return callback(null, true);
+        }
+      } catch (_) {}
+    }
+
+    // Reject unknown origin in production or unauthorized origin in dev
+    return callback(new Error(`Origin '${origin}' not permitted by CORS policy.`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-requested-with']
 }));
 
 app.use(express.json({ limit: '15mb' }));

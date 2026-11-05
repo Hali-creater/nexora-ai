@@ -1,8 +1,9 @@
 const { BaseAdapter } = require('./base');
+const { sanitizeErrorMessage } = require('../services/sanitizer');
 
 /**
  * Universal OpenAI-Compatible Adapter
- * Works seamlessly for: OpenAI, OpenRouter, Groq, DeepSeek, Mistral
+ * Works for: OpenAI, OpenRouter, Groq, DeepSeek, Mistral
  */
 class OpenAICompatibleAdapter extends BaseAdapter {
   constructor(id, name, baseUrl, defaultHeaders = {}) {
@@ -13,13 +14,18 @@ class OpenAICompatibleAdapter extends BaseAdapter {
 
   async testKey(apiKey) {
     const url = `${this.baseUrl}/models`;
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        ...this.defaultHeaders
-      }
-    });
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          ...this.defaultHeaders
+        }
+      });
+    } catch (err) {
+      throw new Error(sanitizeErrorMessage(`Network error connecting to ${this.name}: ${err.message}`, apiKey));
+    }
 
     if (!res.ok) {
       const errText = await res.text();
@@ -28,7 +34,7 @@ class OpenAICompatibleAdapter extends BaseAdapter {
         const parsed = JSON.parse(errText);
         msg = parsed.error?.message || msg;
       } catch (_) {}
-      throw new Error(msg);
+      throw new Error(sanitizeErrorMessage(msg, apiKey));
     }
 
     return { valid: true };
@@ -45,19 +51,25 @@ class OpenAICompatibleAdapter extends BaseAdapter {
         content: m.content
       })),
       stream: true,
+      stream_options: { include_usage: true },
       ...(temperature !== undefined ? { temperature: Number(temperature) } : {}),
       ...(maxTokens ? { max_tokens: Number(maxTokens) } : {})
     };
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        ...this.defaultHeaders
-      },
-      body: JSON.stringify(body)
-    });
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+          ...this.defaultHeaders
+        },
+        body: JSON.stringify(body)
+      });
+    } catch (err) {
+      throw new Error(sanitizeErrorMessage(`Connection to ${this.name} failed: ${err.message}`, apiKey));
+    }
 
     if (!res.ok) {
       const errText = await res.text();
@@ -66,7 +78,7 @@ class OpenAICompatibleAdapter extends BaseAdapter {
         const parsed = JSON.parse(errText);
         errMsg = parsed.error?.message || errMsg;
       } catch (_) {}
-      throw new Error(errMsg);
+      throw new Error(sanitizeErrorMessage(errMsg, apiKey));
     }
 
     const reader = res.body.getReader();
@@ -94,8 +106,9 @@ class OpenAICompatibleAdapter extends BaseAdapter {
           const json = JSON.parse(payload);
           const delta = json.choices?.[0]?.delta?.content || '';
           const finishReason = json.choices?.[0]?.finish_reason;
-          if (delta || finishReason) {
-            onChunk({ text: delta, finishReason, done: false });
+          const usage = json.usage || null;
+          if (delta || finishReason || usage) {
+            onChunk({ text: delta, finishReason, usage, done: false });
           }
         } catch (_) {
           // Ignore parse errors on SSE keep-alive comments
@@ -117,26 +130,38 @@ class AnthropicAdapter extends BaseAdapter {
   }
 
   async testKey(apiKey) {
-    // Test key using minimal token call or header check
+    // Test key using minimal token call
     const url = `${this.baseUrl}/messages`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022',
-        max_tokens: 1,
-        messages: [{ role: 'user', content: 'ping' }]
-      })
-    });
-
-    // If 401, key is definitely invalid
-    if (res.status === 401) {
-      throw new Error('Invalid Anthropic API Key');
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: 'claude-3-5-haiku-20241022',
+          max_tokens: 1,
+          messages: [{ role: 'user', content: 'hi' }]
+        })
+      });
+    } catch (err) {
+      throw new Error(sanitizeErrorMessage(`Connection to Anthropic failed: ${err.message}`, apiKey));
     }
+
+    // Only 200 OK (or success status) indicates a valid key
+    if (res.status !== 200) {
+      const errText = await res.text();
+      let errMsg = `Anthropic key validation failed (HTTP ${res.status})`;
+      try {
+        const parsed = JSON.parse(errText);
+        errMsg = parsed.error?.message || errMsg;
+      } catch (_) {}
+      throw new Error(sanitizeErrorMessage(errMsg, apiKey));
+    }
+
     return { valid: true };
   }
 
@@ -144,7 +169,6 @@ class AnthropicAdapter extends BaseAdapter {
     const { apiKey, model, temperature, maxTokens } = options;
     const url = `${this.baseUrl}/messages`;
 
-    // Extract system prompt if present
     let systemPrompt = '';
     const formattedMessages = [];
 
@@ -159,7 +183,6 @@ class AnthropicAdapter extends BaseAdapter {
       }
     }
 
-    // Anthropic requires non-empty messages and starts with user
     if (formattedMessages.length === 0) {
       formattedMessages.push({ role: 'user', content: 'Hello' });
     }
@@ -173,15 +196,20 @@ class AnthropicAdapter extends BaseAdapter {
       ...(temperature !== undefined ? { temperature: Number(temperature) } : {})
     };
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify(body)
-    });
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify(body)
+      });
+    } catch (err) {
+      throw new Error(sanitizeErrorMessage(`Connection to Anthropic failed: ${err.message}`, apiKey));
+    }
 
     if (!res.ok) {
       const errText = await res.text();
@@ -190,7 +218,7 @@ class AnthropicAdapter extends BaseAdapter {
         const parsed = JSON.parse(errText);
         errMsg = parsed.error?.message || errMsg;
       } catch (_) {}
-      throw new Error(errMsg);
+      throw new Error(sanitizeErrorMessage(errMsg, apiKey));
     }
 
     const reader = res.body.getReader();
@@ -214,6 +242,8 @@ class AnthropicAdapter extends BaseAdapter {
           const json = JSON.parse(payload);
           if (json.type === 'content_block_delta' && json.delta?.text) {
             onChunk({ text: json.delta.text, done: false });
+          } else if (json.type === 'message_delta' && json.usage) {
+            onChunk({ usage: json.usage, done: false });
           } else if (json.type === 'message_stop') {
             onChunk({ done: true });
             return;
@@ -228,6 +258,7 @@ class AnthropicAdapter extends BaseAdapter {
 
 /**
  * Google Gemini Adapter (v1beta Generative Language API)
+ * Transports API key via header 'x-goog-api-key' to avoid sensitive query parameters in URLs and access logs.
  */
 class GeminiAdapter extends BaseAdapter {
   constructor() {
@@ -236,24 +267,36 @@ class GeminiAdapter extends BaseAdapter {
   }
 
   async testKey(apiKey) {
-    const url = `${this.baseUrl}/models?key=${encodeURIComponent(apiKey)}`;
-    const res = await fetch(url);
+    const url = `${this.baseUrl}/models`;
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'x-goog-api-key': apiKey
+        }
+      });
+    } catch (err) {
+      throw new Error(sanitizeErrorMessage(`Connection to Google Gemini failed: ${err.message}`, apiKey));
+    }
+
     if (!res.ok) {
       const errText = await res.text();
-      let msg = 'Invalid Google Gemini API key';
+      let msg = `Google Gemini key validation failed (HTTP ${res.status})`;
       try {
         const parsed = JSON.parse(errText);
         msg = parsed.error?.message || msg;
       } catch (_) {}
-      throw new Error(msg);
+      throw new Error(sanitizeErrorMessage(msg, apiKey));
     }
+
     return { valid: true };
   }
 
   async streamChat(messages, options, onChunk) {
     const { apiKey, model } = options;
     const targetModel = model || 'gemini-2.0-flash';
-    const url = `${this.baseUrl}/models/${targetModel}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
+    const url = `${this.baseUrl}/models/${targetModel}:streamGenerateContent?alt=sse`;
 
     const contents = [];
     let systemInstruction = null;
@@ -274,11 +317,19 @@ class GeminiAdapter extends BaseAdapter {
       ...(systemInstruction ? { systemInstruction } : {})
     };
 
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body)
-    });
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey
+        },
+        body: JSON.stringify(body)
+      });
+    } catch (err) {
+      throw new Error(sanitizeErrorMessage(`Connection to Google Gemini failed: ${err.message}`, apiKey));
+    }
 
     if (!res.ok) {
       const errText = await res.text();
@@ -287,7 +338,7 @@ class GeminiAdapter extends BaseAdapter {
         const parsed = JSON.parse(errText);
         msg = parsed.error?.message || msg;
       } catch (_) {}
-      throw new Error(msg);
+      throw new Error(sanitizeErrorMessage(msg, apiKey));
     }
 
     const reader = res.body.getReader();
@@ -310,8 +361,9 @@ class GeminiAdapter extends BaseAdapter {
         try {
           const json = JSON.parse(payload);
           const text = json.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (text) {
-            onChunk({ text, done: false });
+          const usageMetadata = json.usageMetadata || null;
+          if (text || usageMetadata) {
+            onChunk({ text: text || '', usage: usageMetadata, done: false });
           }
         } catch (_) {}
       }

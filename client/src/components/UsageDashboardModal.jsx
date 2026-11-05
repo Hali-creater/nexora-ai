@@ -111,6 +111,7 @@ export function UsageDashboardModal({ isOpen, onClose }) {
                       <th className="p-3">Provider</th>
                       <th className="p-3">Model</th>
                       <th className="p-3">In / Out Tokens</th>
+                      <th className="p-3">Type</th>
                       <th className="p-3">Duration</th>
                       <th className="p-3">Date</th>
                     </tr>
@@ -118,7 +119,7 @@ export function UsageDashboardModal({ isOpen, onClose }) {
                   <tbody className="divide-y divide-nexora-border/40 font-mono">
                     {usageData?.records?.length === 0 ? (
                       <tr>
-                        <td colSpan="5" className="p-4 text-center text-nexora-muted font-sans">
+                        <td colSpan="6" className="p-4 text-center text-nexora-muted font-sans">
                           No inferences recorded yet.
                         </td>
                       </tr>
@@ -128,6 +129,13 @@ export function UsageDashboardModal({ isOpen, onClose }) {
                           <td className="p-3 text-white capitalize">{r.provider_id}</td>
                           <td className="p-3 text-slate-300">{r.model_id}</td>
                           <td className="p-3 text-nexora-muted">{r.tokens_in} / {r.tokens_out}</td>
+                          <td className="p-3">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                              r.is_estimated ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                            }`}>
+                              {r.is_estimated ? 'Estimated' : 'Provider Reported'}
+                            </span>
+                          </td>
                           <td className="p-3 text-nexora-muted">{r.duration_ms}ms</td>
                           <td className="p-3 text-nexora-muted">{new Date(r.created_at).toLocaleDateString()}</td>
                         </tr>

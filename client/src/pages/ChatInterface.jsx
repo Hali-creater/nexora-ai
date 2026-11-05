@@ -3,7 +3,7 @@ import {
   MessageSquare, Plus, Search, Pin, Trash2, Settings, Key, BarChart3,
   Columns, FolderGit2, LogOut, ChevronLeft, ChevronRight, Send, Paperclip,
   Sparkles, Bot, User, Copy, Check, RotateCw, Edit3, Square, ArrowDown,
-  Cpu, FileCode, ExternalLink, HelpCircle
+  Cpu, FileCode, ExternalLink, HelpCircle, Download
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -449,9 +449,19 @@ export function ChatInterface({ onNavigateHome, onOpenLegal }) {
                     <span className="truncate">{c.title}</span>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <a
+                        href={`/api/conversations/${c.id}/export?format=markdown`}
+                        download
+                        onClick={(e) => e.stopPropagation()}
+                        className="p-1 rounded text-nexora-muted hover:text-white"
+                        title="Export Markdown"
+                      >
+                        <Download className="w-3 h-3" />
+                      </a>
                     <button
                       onClick={(e) => handleDeleteConversation(c.id, e)}
                       className="p-1 rounded text-nexora-muted hover:text-red-400"
+                        title="Delete Chat"
                     >
                       <Trash2 className="w-3 h-3" />
                     </button>

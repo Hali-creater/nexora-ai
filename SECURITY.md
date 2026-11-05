@@ -7,6 +7,10 @@
 - **Strict Tenant Separation:** Cross-user data access is strictly prevented by enforcing `user_id` ownership on every route accessing conversations, messages, files, and project workspaces.
 - **Untrusted File Handling:** Uploaded source files (Python, MQL5, CSV, PDF, JSON) are parsed into safe text buffers for AI context injection. Uploaded code is **never** executed on the server.
 - **Safe Prompt Injection Disclaimers:** File contents injected into system or user prompts are framed in clear delimiter blocks with sanitization to mitigate prompt injection hijacking.
+- **Content Security Policy (CSP):** Implemented via Helmet, ensuring Puter SDK (`https://js.puter.com`) scripts and stylesheets load safely while preventing arbitrary script injection and inline execution vulnerabilities.
+- **Environment & Startup Validation:** The server strictly checks all cryptographic keys and session secrets during startup. It outright refuses production execution if secrets are missing, weak, or using placeholder keys.
+- **Strict CORS Origin Allowlist:** In production, requests from unexpected origins are blocked. Local development origins are configurable via `CORS_ORIGIN`.
+- **Sensitive Credential Sanitization:** All provider adapters sanitize error outputs and scrub bearer tokens, Anthropic/OpenAI keys, and Gemini query strings.
 
 ## 2. Threat Model & Mitigations
 
