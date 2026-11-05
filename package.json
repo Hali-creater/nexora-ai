@@ -1,0 +1,28 @@
+{
+  "name": "nexora-ai-monorepo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "NEXORA AI - Unified Multi-Provider AI Chat Platform",
+  "scripts": {
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "build:client": "cd client && npm run build",
+    "build:server": "cd server && npm run build",
+    "test:server": "cd server && npm test",
+    "test:client": "cd client && npm test",
+    "test": "npm run test:server && npm run test:client"
+  },
+  "keywords": [
+    "ai",
+    "llm",
+    "chatgpt",
+    "puter",
+    "byok",
+    "openrouter",
+    "openai",
+    "gemini",
+    "anthropic"
+  ],
+  "author": "NEXORA AI",
+  "license": "UNLICENSED"
+}

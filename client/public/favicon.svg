@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none">
+  <defs>
+    <linearGradient id="nexoraGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6" />
+      <stop offset="50%" stop-color="#8b5cf6" />
+      <stop offset="100%" stop-color="#06b6d4" />
+    </linearGradient>
+  </defs>
+  <!-- Modern Geometric N Nexus Icon -->
+  <rect width="100" height="100" rx="24" fill="#090d16" />
+  <rect x="2" y="2" width="96" height="96" rx="22" stroke="#1f2b48" stroke-width="2" />
+  <path d="M28 26 V74 M72 26 V74 M28 32 L72 68" stroke="url(#nexoraGrad)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" />
+  <circle cx="28" cy="28" r="4.5" fill="#3b82f6" />
+  <circle cx="72" cy="72" r="4.5" fill="#06b6d4" />
+</svg>

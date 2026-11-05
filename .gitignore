@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build artifacts
+dist/
+build/
+*.tsbuildinfo
+
+# SQLite databases
+server/data/*.db
+server/data/*.db-wal
+server/data/*.db-shm
+*.sqlite
+*.sqlite3
+
+# Environment files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+*.log
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Upload temp storage
+uploads/
+temp/
